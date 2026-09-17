@@ -1,0 +1,10 @@
+# 运行时生成的本地文件
+settings.json
+state.json
+selftest-report.txt
+*.corrupt-*
+*.tmp
+
+# 构建中间产物
+bin/
+obj/
