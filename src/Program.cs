@@ -89,7 +89,9 @@ namespace DeepSeekPet
 
             if (HasFlag(args, "--settings"))
             {
-                Application.Run(new SettingsForm(config, state));
+                string tabOption = GetOption(args, "--tab");
+                int tabIndex = (tabOption != null && tabOption.Trim().ToLowerInvariant().StartsWith("trig")) ? 1 : 0;
+                Application.Run(new SettingsForm(config, state, tabIndex));
                 return 0;
             }
 
@@ -160,6 +162,7 @@ namespace DeepSeekPet
             Console.WriteLine("  DeepSeekPet.exe --key sk-xxx   写入 API Key 后退出");
             Console.WriteLine("  DeepSeekPet.exe --demo         以演示数据启动（不需要 API Key）");
             Console.WriteLine("  DeepSeekPet.exe --settings     直接打开设置窗口");
+            Console.WriteLine("  DeepSeekPet.exe --settings --tab trigger   打开设置并切到「触发显示」页");
             Console.WriteLine("  DeepSeekPet.exe --selftest     运行自检并输出报告");
             Console.WriteLine("  DeepSeekPet.exe --diag         输出屏幕 / DPI / 尺寸诊断信息");
             Console.WriteLine("  DeepSeekPet.exe --render 文件  渲染预览图（--state ok|low|unc|error|empty --mini --dark）");
@@ -319,6 +322,19 @@ namespace DeepSeekPet
                     model.RefreshText = "每 10 分钟刷新";
                     return model;
 
+                case "spend":
+                    model.HasData = true;
+                    model.ToppedUp = 10.52m;
+                    model.Total = 10.52m;
+                    model.CumulativeSpend = 14.47m;
+                    model.Calibrated = true;
+                    model.HasSpendValue = true;
+                    model.ShowSpendPulse = true;
+                    model.SpendPulse = 0.12m;
+                    model.UpdatedText = "更新于 14:26";
+                    model.RefreshText = "每 1 分钟检测";
+                    return model;
+
                 default: // ok
                     model.HasData = true;
                     model.ToppedUp = 10.64m;
@@ -435,6 +451,20 @@ namespace DeepSeekPet
             SizeF mini = Renderer.Measure(model);
             Check(sb, ref failures, "卡片/胶囊尺寸有效",
                 full.Width > 200f && full.Height > 150f && mini.Width > 100f && mini.Height > 50f);
+
+            // 6. 触发显示判定
+            Check(sb, ref failures, "标题命中英文关键词",
+                TriggerEvaluator.MatchTitle("DeepSeek - Google Chrome", "deepseek,深度求索"));
+            Check(sb, ref failures, "标题命中中文关键词",
+                TriggerEvaluator.MatchTitle("深度求索 开放平台 - Chrome", "deepseek,深度求索"));
+            Check(sb, ref failures, "无关标题不误触发",
+                !TriggerEvaluator.MatchTitle("微信", "deepseek,深度求索"));
+            Check(sb, ref failures, "进程名归一化",
+                TriggerEvaluator.NormalizeProcessName("C:\\Program Files\\Code.exe") == "code");
+            Check(sb, ref failures, "进程列表解析（含中文分号/大小写）",
+                TriggerEvaluator.ParseProcessNames("Code.exe, pycharm64.EXE；python").Count == 3);
+            Check(sb, ref failures, "关键词为空时不触发",
+                !TriggerEvaluator.MatchTitle("DeepSeek", ""));
 
             sb.AppendLine();
             sb.AppendLine(failures == 0 ? "结果：PASS（全部通过）" : "结果：FAIL（" + failures + " 项未通过）");

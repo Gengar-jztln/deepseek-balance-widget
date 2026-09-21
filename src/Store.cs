@@ -19,6 +19,12 @@ namespace DeepSeekPet
         public bool TopMost = true;                   // 总在最前
         public bool MiniMode = false;                 // 迷你胶囊模式
         public string Theme = "light";                // light | dark | auto
+        public string ShowMode = "always";            // always | trigger（触发显示）
+        public int TriggerStaySeconds = 90;           // 触发后停留秒数，0 = 不自动隐藏
+        public int TriggerPollSeconds = 60;           // 触发模式下的余额轮询间隔
+        public string TriggerTitleKeywords = "deepseek,深度求索";
+        public string TriggerProcesses = "";          // 逗号分隔的进程名，如 Code.exe,pycharm64.exe
+        public bool TriggerOnSpend = true;            // 检测到 API 消费后弹出
         public decimal SpendCalibration = 0m;         // 累计消费校准值（控制台显示的数字）
         public string SpendCalibrationDate = "";      // 校准日期 yyyy-MM-dd
         public int X = int.MinValue;                  // 窗口位置（逻辑像素）
@@ -109,6 +115,12 @@ namespace DeepSeekPet
             cfg.TopMost = Json.GetBool(root, "topMost", cfg.TopMost);
             cfg.MiniMode = Json.GetBool(root, "miniMode", cfg.MiniMode);
             cfg.Theme = Json.GetString(root, "theme", cfg.Theme);
+            cfg.ShowMode = Json.GetString(root, "showMode", cfg.ShowMode);
+            cfg.TriggerStaySeconds = Json.GetInt(root, "triggerStaySeconds", cfg.TriggerStaySeconds);
+            cfg.TriggerPollSeconds = Json.GetInt(root, "triggerPollSeconds", cfg.TriggerPollSeconds);
+            cfg.TriggerTitleKeywords = Json.GetString(root, "triggerTitleKeywords", cfg.TriggerTitleKeywords);
+            cfg.TriggerProcesses = Json.GetString(root, "triggerProcesses", cfg.TriggerProcesses);
+            cfg.TriggerOnSpend = Json.GetBool(root, "triggerOnSpend", cfg.TriggerOnSpend);
             cfg.SpendCalibration = Json.GetDecimal(root, "spendCalibration", cfg.SpendCalibration);
             cfg.SpendCalibrationDate = Json.GetString(root, "spendCalibrationDate", cfg.SpendCalibrationDate);
             cfg.X = Json.GetInt(root, "x", cfg.X);
@@ -130,6 +142,12 @@ namespace DeepSeekPet
             root["topMost"] = cfg.TopMost;
             root["miniMode"] = cfg.MiniMode;
             root["theme"] = cfg.Theme;
+            root["showMode"] = cfg.ShowMode;
+            root["triggerStaySeconds"] = cfg.TriggerStaySeconds;
+            root["triggerPollSeconds"] = cfg.TriggerPollSeconds;
+            root["triggerTitleKeywords"] = cfg.TriggerTitleKeywords;
+            root["triggerProcesses"] = cfg.TriggerProcesses;
+            root["triggerOnSpend"] = cfg.TriggerOnSpend;
             root["spendCalibration"] = cfg.SpendCalibration;
             root["spendCalibrationDate"] = cfg.SpendCalibrationDate;
             root["x"] = cfg.X;
@@ -144,6 +162,13 @@ namespace DeepSeekPet
             if (cfg.LowBalanceThreshold < 0m) cfg.LowBalanceThreshold = 0m;
             if (string.IsNullOrEmpty(cfg.Currency)) cfg.Currency = "CNY";
             if (cfg.Theme != "dark" && cfg.Theme != "light" && cfg.Theme != "auto") cfg.Theme = "light";
+            if (cfg.ShowMode != "always" && cfg.ShowMode != "trigger") cfg.ShowMode = "always";
+            if (cfg.TriggerStaySeconds < 0) cfg.TriggerStaySeconds = 0;
+            if (cfg.TriggerStaySeconds > 86400) cfg.TriggerStaySeconds = 86400;
+            if (cfg.TriggerPollSeconds < 30) cfg.TriggerPollSeconds = 30;
+            if (cfg.TriggerPollSeconds > 3600) cfg.TriggerPollSeconds = 3600;
+            if (cfg.TriggerTitleKeywords == null) cfg.TriggerTitleKeywords = "";
+            if (cfg.TriggerProcesses == null) cfg.TriggerProcesses = "";
             if (cfg.ApiKey == null) cfg.ApiKey = "";
         }
 

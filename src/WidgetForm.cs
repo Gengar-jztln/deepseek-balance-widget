@@ -18,6 +18,7 @@ namespace DeepSeekPet
         private readonly Config _config;
         private readonly State _state;
         private readonly bool _demo;
+        private readonly TriggerEvaluator _triggers;
         private readonly LayeredSurface _surface = new LayeredSurface();
         private readonly System.Windows.Forms.Timer _timer = new System.Windows.Forms.Timer();
         private readonly NotifyIcon _tray = new NotifyIcon();
@@ -43,6 +44,12 @@ namespace DeepSeekPet
         private bool _refreshing;
         private bool _notifiedLow;
         private DateTime _lastNotifyUtc = DateTime.MinValue;
+        private DateTime _triggerUntilUtc = DateTime.MinValue;
+        private DateTime _lastTriggerCheckUtc = DateTime.MinValue;
+        private bool _manualVisible = true;
+        private bool _settingsOpen;
+        private DateTime _spendPulseUtc = DateTime.MinValue;
+        private decimal _spendPulseAmount;
         private bool _dragging;
         private bool _dragMoved;
         private Point _dragCursorOrigin;
@@ -75,6 +82,7 @@ namespace DeepSeekPet
             _config = config;
             _state = state;
             _demo = demo;
+            _triggers = new TriggerEvaluator(config);
 
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
@@ -132,6 +140,13 @@ namespace DeepSeekPet
             Render(true);
             _timer.Start();
             StartRefresh();
+
+            if (_config.ShowMode == "trigger")
+            {
+                // 触发模式：启动后只驻留托盘，满足条件时才显示卡片
+                _manualVisible = false;
+                BeginInvoke(new MethodInvoker(delegate { Hide(); }));
+            }
         }
 
         private BalanceSnapshot DemoSnapshot()
@@ -208,10 +223,68 @@ namespace DeepSeekPet
                 animating = animating || _snapshot.Info.ToppedUp <= _config.LowBalanceThreshold;
 
             DateTime now = DateTime.UtcNow;
-            if ((now - _lastAttemptUtc).TotalSeconds >= _config.RefreshSeconds) StartRefresh();
+            if ((now - _lastAttemptUtc).TotalSeconds >= EffectivePollSeconds()) StartRefresh();
+
+            if (_config.ShowMode == "trigger")
+            {
+                if ((now - _lastTriggerCheckUtc).TotalMilliseconds >= 1500)
+                {
+                    EvaluateTriggers(now);
+                    _lastTriggerCheckUtc = now;
+                }
+                ApplyTriggerVisibility(now);
+            }
 
             if (_dirty || animating) Render(false);
             else if (DateTime.Now.Millisecond < 45) Render(false);   // 兜底：至少每秒刷新一次
+        }
+
+        /// <summary>触发模式下用更短的轮询间隔，以便及时发现自己这个 Key 的消费。</summary>
+        private int EffectivePollSeconds()
+        {
+            return _config.ShowMode == "trigger" ? _config.TriggerPollSeconds : _config.RefreshSeconds;
+        }
+
+        private bool SpendPulseActive(DateTime now)
+        {
+            if (!_config.TriggerOnSpend || _spendPulseUtc == DateTime.MinValue) return false;
+            return (now - _spendPulseUtc).TotalSeconds <= Math.Max(_config.TriggerStaySeconds, 60);
+        }
+
+        private void EvaluateTriggers(DateTime now)
+        {
+            string title = ForegroundWindowInfo.CurrentTitle();
+            bool active = _triggers.Evaluate(now, title, SpendPulseActive(now));
+            if (!active) return;
+
+            if (_config.TriggerStaySeconds <= 0) _manualVisible = true;      // 0 = 触发后不再自动隐藏
+            else _triggerUntilUtc = now.AddSeconds(_config.TriggerStaySeconds);
+            _dirty = true;
+        }
+
+        private void ApplyTriggerVisibility(DateTime now)
+        {
+            if (_manualVisible) return;
+            if (_menu.Visible || _settingsOpen || _dragging) return;
+            if (Visible && _hover > 0.05f)
+            {
+                // 鼠标停留在卡片上时顺延，避免看着看着就消失
+                _triggerUntilUtc = now.AddSeconds(Math.Max(_config.TriggerStaySeconds, 5));
+                return;
+            }
+
+            if (now <= _triggerUntilUtc)
+            {
+                if (!Visible)
+                {
+                    Show();
+                    _dirty = true;
+                }
+            }
+            else if (Visible)
+            {
+                Hide();
+            }
         }
 
         private void Render(bool force)
@@ -329,6 +402,9 @@ namespace DeepSeekPet
             model.LowBalance = model.HasData && _config.LowBalanceThreshold > 0m
                 && model.ToppedUp <= _config.LowBalanceThreshold;
 
+            model.ShowSpendPulse = SpendPulseActive(now);
+            model.SpendPulse = _spendPulseAmount;
+
             string error = "";
             lock (_sync) { error = _state.LastError; }
             model.IsError = error.Length > 0 && !_refreshing;
@@ -339,7 +415,7 @@ namespace DeepSeekPet
                 DateTime local = _lastSuccessUtc.ToLocalTime();
                 model.UpdatedText = "更新于 " + local.ToString("HH:mm", CultureInfo.InvariantCulture);
                 double ageMinutes = (now - _lastSuccessUtc).TotalMinutes;
-                model.IsStale = ageMinutes > Math.Max(_config.RefreshSeconds / 60.0 * 3.0, 30.0);
+                model.IsStale = ageMinutes > Math.Max(EffectivePollSeconds() / 60.0 * 3.0, 30.0);
             }
             else
             {
@@ -347,16 +423,18 @@ namespace DeepSeekPet
                 model.IsStale = true;
             }
 
-            if (_config.RefreshSeconds % 60 == 0)
+            int pollSeconds = EffectivePollSeconds();
+            string pollVerb = _config.ShowMode == "trigger" ? "检测" : "刷新";
+            if (pollSeconds % 60 == 0)
             {
-                int minutes = _config.RefreshSeconds / 60;
+                int minutes = pollSeconds / 60;
                 model.RefreshText = minutes >= 60
-                    ? "每 " + (minutes / 60).ToString(CultureInfo.InvariantCulture) + " 小时刷新"
-                    : "每 " + minutes.ToString(CultureInfo.InvariantCulture) + " 分钟刷新";
+                    ? "每 " + (minutes / 60).ToString(CultureInfo.InvariantCulture) + " 小时" + pollVerb
+                    : "每 " + minutes.ToString(CultureInfo.InvariantCulture) + " 分钟" + pollVerb;
             }
             else
             {
-                model.RefreshText = "每 " + _config.RefreshSeconds.ToString(CultureInfo.InvariantCulture) + " 秒刷新";
+                model.RefreshText = "每 " + pollSeconds.ToString(CultureInfo.InvariantCulture) + " 秒" + pollVerb;
             }
 
             return model;
@@ -432,7 +510,14 @@ namespace DeepSeekPet
             DateTime now = DateTime.UtcNow;
             if (result.Ok && result.Info != null)
             {
+                decimal previousTotal = _state.LastTotal;
                 SpendTracker.Apply(_state, _config, result.Info, now);
+                if (previousTotal >= 0m && result.Info.Total < previousTotal)
+                {
+                    // 余额下降 = 这个 API Key 真的被用了，作为“正在使用 DeepSeek”的硬信号
+                    _spendPulseUtc = now;
+                    _spendPulseAmount = previousTotal - result.Info.Total;
+                }
                 _state.LastSuccessUtc = now.ToString("o", CultureInfo.InvariantCulture);
                 _state.LastError = "";
                 _lastSuccessUtc = now;
@@ -560,10 +645,15 @@ namespace DeepSeekPet
 
         public void ToggleVisible()
         {
-            if (Visible) Hide();
+            if (Visible)
+            {
+                Hide();
+                _manualVisible = false;
+            }
             else
             {
                 Show();
+                _manualVisible = true;   // 手动打开就一直显示，直到再次手动隐藏
                 Render(true);
             }
         }
@@ -584,7 +674,7 @@ namespace DeepSeekPet
             AddMenuItem("立即刷新", delegate { StartRefresh(); });
             AddMenuItem("迷你模式", delegate { ToggleMiniMode(); }, true, "mini");
             AddMenuItem("总在最前", delegate { ToggleTopMost(); }, true, "topmost");
-            AddMenuItem("隐藏挂件（Ctrl+Alt+Q 呼出）", delegate { Hide(); });
+            AddMenuItem("隐藏挂件（Ctrl+Alt+Q 呼出）", delegate { _manualVisible = false; Hide(); });
             _menu.Items.Add(new ToolStripSeparator());
             AddMenuItem("打开充值页面", delegate { OpenUrl(DeepSeekApi.TopUpUrl); });
             AddMenuItem("打开用量页面", delegate { OpenUrl(DeepSeekApi.UsageUrl); });
@@ -692,16 +782,28 @@ namespace DeepSeekPet
         private void OpenSettings()
         {
             SettingsForm form = new SettingsForm(_config, _state);
+            _settingsOpen = true;
             form.SettingsSaved += delegate
             {
                 _dirty = true;
                 UpdateMenuChecks();
+                if (_config.ShowMode == "trigger" && !_manualVisible)
+                {
+                    // 切到触发模式后，若当前没有触发条件就立刻收起
+                    _triggerUntilUtc = DateTime.MinValue;
+                    _lastTriggerCheckUtc = DateTime.MinValue;
+                }
                 if (_config.ApiKey.Trim().Length > 0)
                 {
                     _lastAttemptUtc = DateTime.MinValue;
                     StartRefresh();
                 }
                 Render(true);
+            };
+            form.FormClosed += delegate
+            {
+                _settingsOpen = false;
+                _dirty = true;
             };
             form.Show();
             form.Activate();
@@ -710,11 +812,13 @@ namespace DeepSeekPet
         private void ShowAbout()
         {
             string text =
-                "DeepSeek 余额挂件 v1.0" + Environment.NewLine + Environment.NewLine +
+                "DeepSeek 余额挂件 v1.1" + Environment.NewLine + Environment.NewLine +
                 "数据来源：" + DeepSeekApi.BalanceUrl + Environment.NewLine + Environment.NewLine +
                 "· 充值余额 / 赠送余额 / 总余额：来自官方接口，精确值。" + Environment.NewLine +
                 "· 累计消费：官方接口未提供，本程序通过余额下降量累加估算，" + Environment.NewLine +
                 "  可用控制台显示的累计消费金额在「设置」中校准。" + Environment.NewLine + Environment.NewLine +
+                "· 触发显示：可设置为“使用 DeepSeek 时才显示”，触发条件为" + Environment.NewLine +
+                "  窗口标题关键词 / 指定进程运行 / 自己的 Key 发生消费。" + Environment.NewLine + Environment.NewLine +
                 "配置文件：" + Store.ConfigPath;
             MessageBox.Show(text, "关于", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }

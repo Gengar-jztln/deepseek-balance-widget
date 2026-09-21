@@ -21,6 +21,8 @@ namespace DeepSeekPet
         public decimal Spend24h;
         public bool HasDaysLeft;
         public double DaysLeft;
+        public bool ShowSpendPulse;
+        public decimal SpendPulse;
         public bool LowBalance;
         public bool IsError;
         public bool IsLoading;
@@ -144,6 +146,7 @@ namespace DeepSeekPet
             y += 14f + 20f;                // 两列统计
             if (model.HasTrend) y += 8f + 15f;
             if (model.Granted > 0m) y += 2f + 15f;
+            if (model.ShowSpendPulse) y += 8f + 15f;
             y += 10f + 15f;                // 底部说明
             y += 13f;                      // 下留白
             return y;
@@ -274,6 +277,17 @@ namespace DeepSeekPet
                 using (SolidBrush grantBrush = new SolidBrush(palette.SecondaryText))
                 {
                     g.DrawString("其中赠送余额 ¥" + Money(model.Granted), grantFont, grantBrush, left + padX, y);
+                }
+                y += 15f;
+            }
+
+            if (model.ShowSpendPulse)
+            {
+                y += 8f;
+                using (Font pulseFont = Font(10.5f, FontStyle.Bold))
+                using (SolidBrush pulseBrush = new SolidBrush(palette.Accent))
+                {
+                    g.DrawString("本次检测到消费 ¥" + Money(model.SpendPulse), pulseFont, pulseBrush, left + padX, y);
                 }
                 y += 15f;
             }
